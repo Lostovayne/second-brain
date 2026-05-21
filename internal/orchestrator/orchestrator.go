@@ -94,7 +94,8 @@ func ScanProject(root string) (string, error) {
 
 		name := d.Name()
 		if d.IsDir() {
-			if name == ".git" || name == "node_modules" || name == "vendor" || name == ".atl" {
+			if name == ".git" || name == "node_modules" || name == "vendor" || name == ".atl" ||
+				name == "dist" || name == "build" || name == "bin" || name == ".vscode" || name == ".idea" {
 				return filepath.SkipDir
 			}
 		}
