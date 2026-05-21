@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"harvester/internal/crawler"
+	"harvester/internal/orchestrator"
 	"harvester/internal/storage"
 )
 
@@ -116,6 +117,10 @@ func (s *Server) handleListTools(req Request) {
 						Type:        "string",
 						Description: "Opcional. URL de origen o nombre de archivo de donde provino este conocimiento.",
 					},
+					"project": {
+						Type:        "string",
+						Description: "Opcional. El nombre del proyecto activo (carpeta del workspace) para restringir el ámbito del conocimiento, o 'global' si es un hecho general.",
+					},
 				},
 				Required: []string{"entity", "content"},
 			},
@@ -129,6 +134,10 @@ func (s *Server) handleListTools(req Request) {
 					"query": {
 						Type:        "string",
 						Description: "El término de búsqueda semántico o palabra clave (ej: 'generics syntax', 'CGO Windows').",
+					},
+					"project": {
+						Type:        "string",
+						Description: "Opcional. El nombre del proyecto activo para buscar conocimientos de este proyecto más los globales transversales.",
 					},
 				},
 				Required: []string{"query"},
@@ -149,6 +158,24 @@ func (s *Server) handleListTools(req Request) {
 					},
 				},
 				Required: []string{"urls"},
+			},
+		},
+		{
+			Name:        "index_project_structure",
+			Description: "Escanea la estructura de archivos y directorios de un proyecto y la registra como conocimiento topológico local en tu cerebro SQLite.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"project_path": {
+						Type:        "string",
+						Description: "La ruta absoluta al directorio raíz del proyecto que se desea escanear.",
+					},
+					"project_name": {
+						Type:        "string",
+						Description: "El nombre identificativo del proyecto para aislar este conocimiento bajo su propio scope.",
+					},
+				},
+				Required: []string{"project_path", "project_name"},
 			},
 		},
 	}
@@ -173,6 +200,8 @@ func (s *Server) handleCallTool(ctx context.Context, req Request) {
 		res = s.toolSearchBrain(params.Arguments)
 	case "crawler_index":
 		res = s.toolCrawlerIndex(ctx, params.Arguments)
+	case "index_project_structure":
+		res = s.toolIndexProjectStructure(params.Arguments)
 	default:
 		s.sendError(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("Herramienta '%s' no encontrada", params.Name))
 		return
@@ -187,6 +216,7 @@ type RememberArgs struct {
 	Entity    string `json:"entity"`
 	Content   string `json:"content"`
 	SourceURL string `json:"source_url,omitempty"`
+	Project   string `json:"project,omitempty"`
 }
 
 func (s *Server) toolRemember(argsJSON json.RawMessage) CallToolResult {
@@ -198,7 +228,7 @@ func (s *Server) toolRemember(argsJSON json.RawMessage) CallToolResult {
 		}
 	}
 
-	obsID, err := s.store.SaveObservation(args.Entity, args.Content, args.SourceURL)
+	obsID, err := s.store.SaveObservation(args.Entity, args.Content, args.SourceURL, args.Project)
 	if err != nil {
 		return CallToolResult{
 			IsError: true,
@@ -217,7 +247,8 @@ func (s *Server) toolRemember(argsJSON json.RawMessage) CallToolResult {
 }
 
 type SearchBrainArgs struct {
-	Query string `json:"query"`
+	Query   string `json:"query"`
+	Project string `json:"project,omitempty"`
 }
 
 func (s *Server) toolSearchBrain(argsJSON json.RawMessage) CallToolResult {
@@ -229,7 +260,7 @@ func (s *Server) toolSearchBrain(argsJSON json.RawMessage) CallToolResult {
 		}
 	}
 
-	results, err := s.store.SearchBrain(args.Query, 5)
+	results, err := s.store.SearchBrain(args.Query, args.Project, 5)
 	if err != nil {
 		return CallToolResult{
 			IsError: true,
@@ -273,6 +304,47 @@ func (s *Server) toolSearchBrain(argsJSON json.RawMessage) CallToolResult {
 	}
 }
 
+type IndexProjectStructureArgs struct {
+	ProjectPath string `json:"project_path"`
+	ProjectName string `json:"project_name"`
+}
+
+func (s *Server) toolIndexProjectStructure(argsJSON json.RawMessage) CallToolResult {
+	var args IndexProjectStructureArgs
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return CallToolResult{
+			IsError: true,
+			Content: []ContentBlock{{Type: "text", Text: fmt.Sprintf("Error parseando argumentos: %v", err)}},
+		}
+	}
+
+	mdMap, err := orchestrator.ScanProject(args.ProjectPath)
+	if err != nil {
+		return CallToolResult{
+			IsError: true,
+			Content: []ContentBlock{{Type: "text", Text: fmt.Sprintf("Error escaneando el directorio del proyecto: %v", err)}},
+		}
+	}
+
+	// Guardar el mapa topológico en el cerebro SQLite bajo el project scope local
+	obsID, err := s.store.SaveObservation("Project Topology", mdMap, args.ProjectPath, args.ProjectName)
+	if err != nil {
+		return CallToolResult{
+			IsError: true,
+			Content: []ContentBlock{{Type: "text", Text: fmt.Sprintf("Error guardando el mapa topológico en SQLite: %v", err)}},
+		}
+	}
+
+	return CallToolResult{
+		Content: []ContentBlock{
+			{
+				Type: "text",
+				Text: fmt.Sprintf("🏗️  [TOPOLOGÍA INDEXADA] Escaneé con éxito la estructura de directorios del proyecto y guardé el mapa topológico (observación #%d) bajo el scope local '%s' en tu cerebro local.", obsID, args.ProjectName),
+			},
+		},
+	}
+}
+
 type CrawlerIndexArgs struct {
 	URLs []string `json:"urls"`
 }
@@ -310,7 +382,7 @@ func (s *Server) toolCrawlerIndex(ctx context.Context, argsJSON json.RawMessage)
 			}
 
 			// Ingesta Fase 2 (Almacenar también en el cerebro autolimpiante)
-			_, err = s.store.SaveObservation(res.Title, fmt.Sprintf("Documento indexado desde la web. Cuerpo: %s", res.Content), res.URL)
+			_, err = s.store.SaveObservation(res.Title, fmt.Sprintf("Documento indexado desde la web. Cuerpo: %s", res.Content), res.URL, "global")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "⚠️ [CRAWLER BG DB ERROR] Error al guardar observación semántica: %v\n", err)
 			}

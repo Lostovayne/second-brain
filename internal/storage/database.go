@@ -111,6 +111,7 @@ func (s *Storage) bootstrap() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT UNIQUE NOT NULL,
 			category TEXT NOT NULL, -- 'library', 'language', 'user_preference', 'rule', 'concept'
+			project TEXT DEFAULT 'global',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
 
@@ -120,6 +121,7 @@ func (s *Storage) bootstrap() error {
 			entity_id INTEGER NOT NULL,
 			content TEXT NOT NULL,
 			source_url TEXT,
+			project TEXT DEFAULT 'global',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
 		);`,
@@ -129,7 +131,8 @@ func (s *Storage) bootstrap() error {
 			source_id INTEGER NOT NULL,
 			target_id INTEGER NOT NULL,
 			relation_type TEXT NOT NULL, -- 'DEPRECATED_BY', 'COMPATIBLE_WITH', 'USES', 'DEPENDS_ON'
-			PRIMARY KEY (source_id, target_id, relation_type),
+			project TEXT DEFAULT 'global',
+			PRIMARY KEY (source_id, target_id, relation_type, project),
 			FOREIGN KEY(source_id) REFERENCES entities(id) ON DELETE CASCADE,
 			FOREIGN KEY(target_id) REFERENCES entities(id) ON DELETE CASCADE
 		);`,
@@ -148,6 +151,15 @@ func (s *Storage) bootstrap() error {
 			return fmt.Errorf("error ejecutando migración: %w", err)
 		}
 	}
+
+	// --- MIGRACIÓN EN CALIENTE / ZERO-DOWNTIME ---
+	// Dado que el usuario ya tiene 'harvester.db' creado en fases anteriores, 
+	// ejecutamos sentencias ALTER TABLE silenciosas para agregar la columna 'project'
+	// en caso de que las tablas ya existieran previamente sin ella.
+	_, _ = s.db.Exec("ALTER TABLE entities ADD COLUMN project TEXT DEFAULT 'global'")
+	_, _ = s.db.Exec("ALTER TABLE observations ADD COLUMN project TEXT DEFAULT 'global'")
+	_, _ = s.db.Exec("ALTER TABLE relations ADD COLUMN project TEXT DEFAULT 'global'")
+
 	return nil
 }
 
@@ -233,14 +245,19 @@ func (s *Storage) Search(query string, limit int) ([]SearchResult, error) {
 // === MÉTODOS DE LA FASE 2 ("Second Brain" Semántico) ===
 
 // SaveEntity guarda o recupera una entidad según su nombre único (case-insensitive).
-func (s *Storage) SaveEntity(name, category string) (int64, error) {
+// SaveEntity guarda o recupera una entidad según su nombre único (case-insensitive).
+func (s *Storage) SaveEntity(name, category, project string) (int64, error) {
 	name = strings.TrimSpace(name)
 	category = strings.TrimSpace(category)
+	project = strings.TrimSpace(project)
 	if name == "" {
 		return 0, fmt.Errorf("el nombre de la entidad no puede estar vacío")
 	}
 	if category == "" {
 		category = "concept"
+	}
+	if project == "" {
+		project = "global"
 	}
 
 	var id int64
@@ -248,7 +265,7 @@ func (s *Storage) SaveEntity(name, category string) (int64, error) {
 	// pero para estar 100% seguros buscamos usando un matching exacto.
 	err := s.db.QueryRow("SELECT id FROM entities WHERE LOWER(name) = LOWER(?)", name).Scan(&id)
 	if err == sql.ErrNoRows {
-		res, err := s.db.Exec("INSERT INTO entities (name, category) VALUES (?, ?)", name, category)
+		res, err := s.db.Exec("INSERT INTO entities (name, category, project) VALUES (?, ?, ?)", name, category, project)
 		if err != nil {
 			return 0, fmt.Errorf("error al insertar entidad: %w", err)
 		}
@@ -264,13 +281,17 @@ func (s *Storage) SaveEntity(name, category string) (int64, error) {
 }
 
 // SaveObservation asocia un hecho u observación técnica a una entidad e indexa en FTS5.
-func (s *Storage) SaveObservation(entityName, content, sourceURL string) (int64, error) {
+func (s *Storage) SaveObservation(entityName, content, sourceURL, project string) (int64, error) {
 	entityName = strings.TrimSpace(entityName)
 	content = strings.TrimSpace(content)
 	sourceURL = strings.TrimSpace(sourceURL)
+	project = strings.TrimSpace(project)
 
 	if entityName == "" || content == "" {
 		return 0, fmt.Errorf("el nombre de entidad y el contenido de observación no pueden estar vacíos")
+	}
+	if project == "" {
+		project = "global"
 	}
 
 	tx, err := s.db.Begin()
@@ -283,7 +304,7 @@ func (s *Storage) SaveObservation(entityName, content, sourceURL string) (int64,
 	var entityID int64
 	err = tx.QueryRow("SELECT id FROM entities WHERE LOWER(name) = LOWER(?)", entityName).Scan(&entityID)
 	if err == sql.ErrNoRows {
-		res, err := tx.Exec("INSERT INTO entities (name, category) VALUES (?, 'concept')", entityName)
+		res, err := tx.Exec("INSERT INTO entities (name, category, project) VALUES (?, 'concept', ?)", entityName, project)
 		if err != nil {
 			return 0, fmt.Errorf("error al auto-crear entidad: %w", err)
 		}
@@ -295,9 +316,9 @@ func (s *Storage) SaveObservation(entityName, content, sourceURL string) (int64,
 		return 0, fmt.Errorf("error al buscar entidad: %w", err)
 	}
 
-	// 2. Comprobar si la observación exacta ya existe para evitar meter basura duplicada
+	// 2. Comprobar si la observación exacta ya existe para evitar meter basura duplicada en este proyecto
 	var obsID int64
-	err = tx.QueryRow("SELECT id FROM observations WHERE entity_id = ? AND content = ?", entityID, content).Scan(&obsID)
+	err = tx.QueryRow("SELECT id FROM observations WHERE entity_id = ? AND content = ? AND project = ?", entityID, content, project).Scan(&obsID)
 	if err == nil {
 		// Duplicado exacto detectado: retornamos el ID existente pacíficamente
 		return obsID, nil
@@ -306,7 +327,7 @@ func (s *Storage) SaveObservation(entityName, content, sourceURL string) (int64,
 	}
 
 	// 3. Insertar observación
-	res, err := tx.Exec("INSERT INTO observations (entity_id, content, source_url) VALUES (?, ?, ?)", entityID, content, sourceURL)
+	res, err := tx.Exec("INSERT INTO observations (entity_id, content, source_url, project) VALUES (?, ?, ?, ?)", entityID, content, sourceURL, project)
 	if err != nil {
 		return 0, fmt.Errorf("error al insertar observación: %w", err)
 	}
@@ -329,30 +350,34 @@ func (s *Storage) SaveObservation(entityName, content, sourceURL string) (int64,
 }
 
 // LinkEntities establece una relación semántica direccional entre dos entidades (ej. "Go" -> "USES" -> "Generics").
-func (s *Storage) LinkEntities(sourceName, targetName, relationType string) error {
+func (s *Storage) LinkEntities(sourceName, targetName, relationType, project string) error {
 	sourceName = strings.TrimSpace(sourceName)
 	targetName = strings.TrimSpace(targetName)
 	relationType = strings.TrimSpace(strings.ToUpper(relationType))
+	project = strings.TrimSpace(project)
 
 	if sourceName == "" || targetName == "" || relationType == "" {
 		return fmt.Errorf("los parámetros de relación no pueden estar vacíos")
 	}
+	if project == "" {
+		project = "global"
+	}
 
-	sourceID, err := s.SaveEntity(sourceName, "concept")
+	sourceID, err := s.SaveEntity(sourceName, "concept", project)
 	if err != nil {
 		return fmt.Errorf("error al resolver entidad origen: %w", err)
 	}
 
-	targetID, err := s.SaveEntity(targetName, "concept")
+	targetID, err := s.SaveEntity(targetName, "concept", project)
 	if err != nil {
 		return fmt.Errorf("error al resolver entidad destino: %w", err)
 	}
 
 	// Insert OR Ignore para evitar violaciones de clave primaria si ya existe el enlace
 	_, err = s.db.Exec(`
-		INSERT OR IGNORE INTO relations (source_id, target_id, relation_type)
-		VALUES (?, ?, ?)
-	`, sourceID, targetID, relationType)
+		INSERT OR IGNORE INTO relations (source_id, target_id, relation_type, project)
+		VALUES (?, ?, ?, ?)
+	`, sourceID, targetID, relationType, project)
 	if err != nil {
 		return fmt.Errorf("error al guardar relación semántica: %w", err)
 	}
@@ -361,10 +386,14 @@ func (s *Storage) LinkEntities(sourceName, targetName, relationType string) erro
 }
 
 // SearchBrain realiza una búsqueda de texto completo con BM25 en observaciones y le inyecta las relaciones conectadas.
-func (s *Storage) SearchBrain(query string, limit int) ([]BrainSearchResult, error) {
+func (s *Storage) SearchBrain(query, project string, limit int) ([]BrainSearchResult, error) {
 	cleanedQuery := sanitizeQuery(query)
 	if cleanedQuery == "" {
 		return nil, nil
+	}
+	project = strings.TrimSpace(project)
+	if project == "" {
+		project = "global"
 	}
 
 	sqlQuery := `
@@ -379,12 +408,12 @@ func (s *Storage) SearchBrain(query string, limit int) ([]BrainSearchResult, err
 		FROM observations_fts
 		JOIN observations o ON o.id = observations_fts.observation_id
 		JOIN entities e ON e.id = o.entity_id
-		WHERE observations_fts MATCH ?
+		WHERE (o.project = ? OR o.project = 'global') AND observations_fts MATCH ?
 		ORDER BY rank ASC
 		LIMIT ?;
 	`
 
-	rows, err := s.db.Query(sqlQuery, cleanedQuery, limit)
+	rows, err := s.db.Query(sqlQuery, project, cleanedQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("error en la búsqueda FTS5 del cerebro con query '%s' (sanitizado: '%s'): %w", query, cleanedQuery, err)
 	}
@@ -398,7 +427,7 @@ func (s *Storage) SearchBrain(query string, limit int) ([]BrainSearchResult, err
 		}
 
 		// Obtener relaciones semánticas legibles asociadas a esta entidad
-		relations, err := s.getEntityRelations(res.EntityName)
+		relations, err := s.getEntityRelations(res.EntityName, project)
 		if err == nil {
 			res.Relations = relations
 		}
@@ -410,15 +439,15 @@ func (s *Storage) SearchBrain(query string, limit int) ([]BrainSearchResult, err
 }
 
 // getEntityRelations obtiene todos los enlaces semánticos donde esta entidad participa.
-func (s *Storage) getEntityRelations(entityName string) ([]string, error) {
+func (s *Storage) getEntityRelations(entityName, project string) ([]string, error) {
 	query := `
 		SELECT r.relation_type, e2.name
 		FROM relations r
 		JOIN entities e1 ON e1.id = r.source_id
 		JOIN entities e2 ON e2.id = r.target_id
-		WHERE LOWER(e1.name) = LOWER(?)
+		WHERE LOWER(e1.name) = LOWER(?) AND (r.project = ? OR r.project = 'global')
 	`
-	rows, err := s.db.Query(query, entityName)
+	rows, err := s.db.Query(query, entityName, project)
 	if err != nil {
 		return nil, err
 	}
@@ -587,7 +616,7 @@ func tokenizeWords(s string) map[string]bool {
 // Mapea el destino y crea enlaces semánticos automáticos en SQLite.
 func (s *Storage) AutoLink() (int, error) {
 	query := `
-		SELECT o.id, e.name, o.content
+		SELECT o.id, e.name, o.content, o.project
 		FROM observations o
 		JOIN entities e ON e.id = o.entity_id
 	`
@@ -601,12 +630,13 @@ func (s *Storage) AutoLink() (int, error) {
 		id         int64
 		entityName string
 		content    string
+		project    string
 	}
 
 	var list []obsRow
 	for rows.Next() {
 		var r obsRow
-		if err := rows.Scan(&r.id, &r.entityName, &r.content); err != nil {
+		if err := rows.Scan(&r.id, &r.entityName, &r.content, &r.project); err != nil {
 			return 0, fmt.Errorf("error al escanear observación: %w", err)
 		}
 		list = append(list, r)
@@ -637,7 +667,7 @@ func (s *Storage) AutoLink() (int, error) {
 			if strings.Contains(contentLower, t.phrase) {
 				target := parseRelationTarget(item.content, t.phrase)
 				if target != "" && strings.ToLower(item.entityName) != strings.ToLower(target) {
-					err := s.LinkEntities(item.entityName, target, t.rel)
+					err := s.LinkEntities(item.entityName, target, t.rel, item.project)
 					if err == nil {
 						linkedCount++
 					}

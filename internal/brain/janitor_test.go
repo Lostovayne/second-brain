@@ -22,11 +22,11 @@ func TestJanitor_Deduplication(t *testing.T) {
 	obs1 := "Docker enables containerized applications with extremely simple configurations."
 	obs2 := "Docker enables containerized applications with simple configurations." // Más corto, duplicado cercano
 
-	id1, err := store.SaveObservation(entity, obs1, "https://docker.com")
+	id1, err := store.SaveObservation(entity, obs1, "https://docker.com", "global")
 	if err != nil {
 		t.Fatalf("Error al guardar obs1: %v", err)
 	}
-	id2, err := store.SaveObservation(entity, obs2, "https://docker.com")
+	id2, err := store.SaveObservation(entity, obs2, "https://docker.com", "global")
 	if err != nil {
 		t.Fatalf("Error al guardar obs2: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestJanitor_Deduplication(t *testing.T) {
 	}
 
 	// 3. Buscar en el cerebro y verificar que se conservó la observación más larga (obs1)
-	results, err := store.SearchBrain("Docker", 5)
+	results, err := store.SearchBrain("Docker", "global", 5)
 	if err != nil {
 		t.Fatalf("Error en búsqueda del cerebro: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestJanitor_Deduplication(t *testing.T) {
 	}
 
 	// Comprobar que el ID eliminado ya no está accesible en FTS5
-	ftsResults, err := store.SearchBrain(obs2, 5)
+	ftsResults, err := store.SearchBrain(obs2, "global", 5)
 	if err != nil {
 		t.Fatalf("Error buscando en FTS: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestJanitor_AutoLink(t *testing.T) {
 	sourceEntity := "React"
 	content := "React is a UI component library that depends on JavaScript."
 	
-	_, err = store.SaveObservation(sourceEntity, content, "")
+	_, err = store.SaveObservation(sourceEntity, content, "", "global")
 	if err != nil {
 		t.Fatalf("Error al guardar observación: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestJanitor_AutoLink(t *testing.T) {
 	}
 
 	// 3. Buscar "React" en el cerebro y verificar que tiene la conexión inyectada
-	results, err := store.SearchBrain("React", 5)
+	results, err := store.SearchBrain("React", "global", 5)
 	if err != nil {
 		t.Fatalf("Error al buscar React: %v", err)
 	}
