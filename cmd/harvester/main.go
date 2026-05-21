@@ -31,7 +31,7 @@ func main() {
 	switch command {
 	case "index":
 		if len(os.Args) < 3 {
-			fmt.Println("⚠️  Error: Debes proveer al menos una URL para indexar.")
+			fmt.Println("Error: Debes proveer al menos una URL para indexar.")
 			fmt.Println("Ejemplo: go run cmd/harvester/main.go index https://go.dev/doc/ https://go.dev/blog/")
 			return
 		}
@@ -40,7 +40,7 @@ func main() {
 
 	case "search":
 		if len(os.Args) < 3 {
-			fmt.Println("⚠️  Error: Debes ingresar un término de búsqueda.")
+			fmt.Println("Error: Debes ingresar un término de búsqueda.")
 			fmt.Println("Ejemplo: go run cmd/harvester/main.go search \"worker pool\"")
 			return
 		}
@@ -56,7 +56,7 @@ func main() {
 func printUsage() {
 	fmt.Println()
 	fmt.Println("=======================================================")
-	fmt.Println("🔥  AI Context Harvester - CLI (Fase 1)")
+	fmt.Println("  AI Context Harvester - CLI (Fase 1)")
 	fmt.Println("=======================================================")
 	fmt.Println("Uso:")
 	fmt.Println("  go run cmd/harvester/main.go index <url1> <url2> ...   Indexa concurrentemente las URLs")
@@ -66,7 +66,7 @@ func printUsage() {
 }
 
 func runIndexing(store *storage.Storage, urls []string) {
-	fmt.Printf("\n🚀 Iniciando descarga concurrente de %d URL(s) con 3 workers...\n", len(urls))
+	fmt.Printf("\nIniciando descarga concurrente de %d URL(s) con 3 workers...\n", len(urls))
 	
 	c := crawler.NewCrawler(3)
 	
@@ -82,7 +82,7 @@ func runIndexing(store *storage.Storage, urls []string) {
 
 	for res := range resultsChan {
 		if res.Err != nil {
-			fmt.Printf("❌  [ERROR] %s -> %v\n", res.URL, res.Err)
+			fmt.Printf("[ERROR] %s -> %v\n", res.URL, res.Err)
 			errorCount++
 			continue
 		}
@@ -90,21 +90,21 @@ func runIndexing(store *storage.Storage, urls []string) {
 		// Guardar en base de datos de manera atómica (metadatos + FTS5)
 		docID, err := store.SaveDocument(res.URL, res.Title, res.Content)
 		if err != nil {
-			fmt.Printf("❌  [DB ERROR] Error al guardar %s en SQLite: %v\n", res.URL, err)
+			fmt.Printf("[DB ERROR] Error al guardar %s en SQLite: %v\n", res.URL, err)
 			errorCount++
 			continue
 		}
 
-		fmt.Printf("✅  [INDEXADO] ID #%d | %s (%s)\n", docID, res.Title, res.URL)
+		fmt.Printf("[INDEXADO] ID #%d | %s (%s)\n", docID, res.Title, res.URL)
 		successCount++
 	}
 
-	fmt.Printf("\n✨ Ingesta concurrente finalizada en %v\n", time.Since(startTime).Round(time.Millisecond))
-	fmt.Printf("📊 Resumen: %d exitosas, %d fallidas. Datos persistidos en 'harvester.db'\n\n", successCount, errorCount)
+	fmt.Printf("\nIngesta concurrente finalizada en %v\n", time.Since(startTime).Round(time.Millisecond))
+	fmt.Printf("Resumen: %d exitosas, %d fallidas. Datos persistidos en 'harvester.db'\n\n", successCount, errorCount)
 }
 
 func runSearch(store *storage.Storage, query string) {
-	fmt.Printf("\n🔍 Buscando por: \"%s\" (Clasificado por SQLite FTS5 BM25)\n", query)
+	fmt.Printf("\nBuscando por: \"%s\" (Clasificado por SQLite FTS5 BM25)\n", query)
 	fmt.Println(strings.Repeat("=", 65))
 
 	// Buscamos hasta las 5 mejores coincidencias
@@ -114,15 +114,15 @@ func runSearch(store *storage.Storage, query string) {
 	}
 
 	if len(results) == 0 {
-		fmt.Println("ℹ️  No se encontraron coincidencias para la consulta dada.")
+		fmt.Println("No se encontraron coincidencias para la consulta dada.")
 		return
 	}
 
-	fmt.Printf("🎉 Se encontraron %d resultados altamente relevantes:\n\n", len(results))
+	fmt.Printf("Se encontraron %d resultados altamente relevantes:\n\n", len(results))
 	for i, res := range results {
-		fmt.Printf("[%d] 🏆 BM25 Score: %.4f | %s\n", i+1, res.Rank, res.Title)
-		fmt.Printf("    🔗 Fuente: %s\n", res.URL)
-		fmt.Printf("    📝 Snippet: %s\n", res.Snippet)
+		fmt.Printf("[%d] BM25 Score: %.4f | %s\n", i+1, res.Rank, res.Title)
+		fmt.Printf("    Fuente: %s\n", res.URL)
+		fmt.Printf("    Snippet: %s\n", res.Snippet)
 		fmt.Println(strings.Repeat("-", 65))
 	}
 }

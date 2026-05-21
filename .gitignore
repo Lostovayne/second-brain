@@ -4,5 +4,6 @@
 harvester.db
 mcp-server.exe
 *.exe
+*.zip
 *~
 *.exe~

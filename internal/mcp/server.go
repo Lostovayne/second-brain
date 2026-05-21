@@ -240,7 +240,7 @@ func (s *Server) toolRemember(argsJSON json.RawMessage) CallToolResult {
 		Content: []ContentBlock{
 			{
 				Type: "text",
-				Text: fmt.Sprintf("🧠 [MEMORIA PERSISTIDA] Guardé la observación #%d vinculada a '%s' con éxito en tu base de datos SQLite local.", obsID, args.Entity),
+				Text: fmt.Sprintf("[MEMORIA PERSISTIDA] Guardé la observación #%d vinculada a '%s' con éxito en tu base de datos SQLite local.", obsID, args.Entity),
 			},
 		},
 	}
@@ -280,21 +280,21 @@ func (s *Server) toolSearchBrain(argsJSON json.RawMessage) CallToolResult {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📖 Encontré %d hechos técnicos y reglas de interés en tu cerebro local (SQLite FTS5 BM25):\n\n", len(results)))
+	sb.WriteString(fmt.Sprintf("Encontré %d hechos técnicos y reglas de interés en tu cerebro local (SQLite FTS5 BM25):\n\n", len(results)))
 	for i, res := range results {
-		sb.WriteString(fmt.Sprintf("[%d] 🏆 Relevancia BM25: %.4f | Entidad: %s (%s)\n", i+1, res.Rank, res.EntityName, res.EntityCategory))
-		sb.WriteString(fmt.Sprintf("    📝 Detalle: %s\n", res.Content))
+		sb.WriteString(fmt.Sprintf("[%d] Relevancia BM25: %.4f | Entidad: %s (%s)\n", i+1, res.Rank, res.EntityName, res.EntityCategory))
+		sb.WriteString(fmt.Sprintf("    Detalle: %s\n", res.Content))
 		
 		// Inyectar relaciones semánticas
 		if len(res.Relations) > 0 {
-			sb.WriteString("    🔗 Conexiones Semánticas:\n")
+			sb.WriteString("    Conexiones Semánticas:\n")
 			for _, rel := range res.Relations {
 				sb.WriteString(fmt.Sprintf("      - %s\n", rel))
 			}
 		}
 
 		if res.SourceURL != "" {
-			sb.WriteString(fmt.Sprintf("    🔗 Origen: %s\n", res.SourceURL))
+			sb.WriteString(fmt.Sprintf("    Origen: %s\n", res.SourceURL))
 		}
 		sb.WriteString("\n" + strings.Repeat("-", 60) + "\n")
 	}
@@ -339,7 +339,7 @@ func (s *Server) toolIndexProjectStructure(argsJSON json.RawMessage) CallToolRes
 		Content: []ContentBlock{
 			{
 				Type: "text",
-				Text: fmt.Sprintf("🏗️  [TOPOLOGÍA INDEXADA] Escaneé con éxito la estructura de directorios del proyecto y guardé el mapa topológico (observación #%d) bajo el scope local '%s' en tu cerebro local.", obsID, args.ProjectName),
+				Text: fmt.Sprintf("[TOPOLOGÍA INDEXADA] Escaneé con éxito la estructura de directorios del proyecto y guardé el mapa topológico (observación #%d) bajo el scope local '%s' en tu cerebro local.", obsID, args.ProjectName),
 			},
 		},
 	}
@@ -384,7 +384,7 @@ func (s *Server) toolCrawlerIndex(ctx context.Context, argsJSON json.RawMessage)
 			// Ingesta Fase 2 (Almacenar también en el cerebro autolimpiante)
 			_, err = s.store.SaveObservation(res.Title, fmt.Sprintf("Documento indexado desde la web. Cuerpo: %s", res.Content), res.URL, "global")
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "⚠️ [CRAWLER BG DB ERROR] Error al guardar observación semántica: %v\n", err)
+				fmt.Fprintf(os.Stderr, "[CRAWLER BG DB ERROR] Error al guardar observación semántica: %v\n", err)
 			}
 		}
 	}()
@@ -393,7 +393,7 @@ func (s *Server) toolCrawlerIndex(ctx context.Context, argsJSON json.RawMessage)
 		Content: []ContentBlock{
 			{
 				Type: "text",
-				Text: fmt.Sprintf("🚀 El motor de descarga ha encolado %d URL(s) en segundo plano de manera concurrente. Los resultados se indexarán en caliente.", len(args.URLs)),
+				Text: fmt.Sprintf("El motor de descarga ha encolado %d URL(s) en segundo plano de manera concurrente. Los resultados se indexarán en caliente.", len(args.URLs)),
 			},
 		},
 	}

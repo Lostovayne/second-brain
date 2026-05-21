@@ -72,7 +72,7 @@ func ScanProject(root string) (string, error) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# 🏗️ Estructura del Proyecto: %s\n\n", filepath.Base(absRoot)))
+	sb.WriteString(fmt.Sprintf("# Estructura del Proyecto: %s\n\n", filepath.Base(absRoot)))
 	sb.WriteString("Esta es la topología física y arquitectura de directorios del proyecto, escaneada de forma automática.\n\n")
 
 	err = filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
@@ -108,9 +108,9 @@ func ScanProject(root string) (string, error) {
 
 		indent := strings.Repeat("  ", depth-1)
 		if d.IsDir() {
-			sb.WriteString(fmt.Sprintf("%s- 📁 **%s/**\n", indent, name))
+			sb.WriteString(fmt.Sprintf("%s- [DIR] **%s/**\n", indent, name))
 		} else {
-			sb.WriteString(fmt.Sprintf("%s- 📄 %s", indent, name))
+			sb.WriteString(fmt.Sprintf("%s- [FILE] %s", indent, name))
 			// Si es un archivo de Go, realizamos el parseo AST liviano
 			if strings.HasSuffix(name, ".go") {
 				structs, interfaces, funcs, err := parseGoFileAST(path)
