@@ -49,14 +49,15 @@ type Observation struct {
 
 // BrainSearchResult representa un resultado enriquecido para búsquedas en el segundo cerebro.
 type BrainSearchResult struct {
-	ObservationID  int64    `json:"observation_id"`
-	EntityName     string   `json:"entity_name"`
-	EntityCategory string   `json:"entity_category"`
-	Content        string   `json:"content"`
-	SourceURL      string   `json:"source_url,omitempty"`
-	Snippet        string   `json:"snippet"`
-	Rank           float64  `json:"rank"`
-	Relations      []string `json:"relations,omitempty"` // Relaciones semánticas conectadas
+	ObservationID       int64    `json:"observation_id"`
+	EntityName          string   `json:"entity_name"`
+	EntityCategory      string   `json:"entity_category"`
+	Content             string   `json:"content"`
+	SourceURL           string   `json:"source_url,omitempty"`
+	Snippet             string   `json:"snippet"`
+	Rank                float64  `json:"rank"`
+	Relations           []string `json:"relations,omitempty"`            // Relaciones semánticas conectadas
+	TransitiveRelations []string `json:"transitive_relations,omitempty"` // Inferencia transitiva de N-saltos (Fase B)
 }
 
 // === CONTROLLER & CONEXIÓN ===
@@ -432,6 +433,12 @@ func (s *Storage) SearchBrain(query, project string, limit int) ([]BrainSearchRe
 			res.Relations = relations
 		}
 
+		// Fase B: Obtener inferencias transitivas de hasta 3 saltos
+		transitive, err := s.getTransitiveRelations(res.EntityName, project, 3)
+		if err == nil {
+			res.TransitiveRelations = transitive
+		}
+
 		results = append(results, res)
 	}
 
@@ -461,6 +468,65 @@ func (s *Storage) getEntityRelations(entityName, project string) ([]string, erro
 		}
 	}
 	return relations, nil
+}
+
+// getTransitiveRelations realiza una consulta recursiva CTE para hallar enlaces semánticos transitivos (N-saltos).
+func (s *Storage) getTransitiveRelations(entityName, project string, maxDepth int) ([]string, error) {
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+	project = strings.TrimSpace(project)
+	if project == "" {
+		project = "global"
+	}
+
+	query := `
+		WITH RECURSIVE transitive_relations(source_id, target_id, relation_type, depth, path) AS (
+			-- Caso base: Enlaces directos de la entidad de origen
+			SELECT 
+				r.source_id, 
+				r.target_id, 
+				r.relation_type, 
+				1, 
+				e_src.name || ' --[' || r.relation_type || ']--> ' || e_tgt.name
+			FROM relations r
+			JOIN entities e_src ON r.source_id = e_src.id
+			JOIN entities e_tgt ON r.target_id = e_tgt.id
+			WHERE LOWER(e_src.name) = LOWER(?) AND (r.project = ? OR r.project = 'global')
+
+			UNION ALL
+
+			-- Caso recursivo: Unir relaciones donde el target es el origen de la siguiente relación
+			SELECT 
+				tr.source_id, 
+				r.target_id, 
+				r.relation_type, 
+				tr.depth + 1, 
+				tr.path || ' --[' || r.relation_type || ']--> ' || e_tgt.name
+			FROM transitive_relations tr
+			JOIN relations r ON tr.target_id = r.source_id
+			JOIN entities e_tgt ON r.target_id = e_tgt.id
+			WHERE tr.depth < ? AND (r.project = ? OR r.project = 'global')
+		)
+		SELECT DISTINCT 
+			tr.path
+		FROM transitive_relations tr
+		ORDER BY tr.depth ASC;
+	`
+	rows, err := s.db.Query(query, entityName, project, maxDepth, project)
+	if err != nil {
+		return nil, fmt.Errorf("error al ejecutar inferencia transitiva para '%s': %w", entityName, err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err == nil {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
 }
 
 // === MÉTODOS DE LA FASE 2: JANITOR (DEDUPLICACIÓN Y AUTOAPRENDIZAJE) ===

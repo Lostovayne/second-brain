@@ -233,3 +233,57 @@ func TestStorageHierarchicalScoping(t *testing.T) {
 		t.Errorf("Contenido incorrecto para project-C: %s", resC[0].Content)
 	}
 }
+
+func TestStorageTransitiveRelations(t *testing.T) {
+	tempDB := "test_harvester_transitive.db"
+	defer os.Remove(tempDB)
+
+	s, err := NewStorage(tempDB)
+	if err != nil {
+		t.Fatalf("Error al inicializar Storage de test: %v", err)
+	}
+	defer s.Close()
+
+	project := "test-project"
+
+	// 1. Crear cadena de dependencias semánticas
+	// Entidad A -> USES -> Entidad B
+	err = s.LinkEntities("Entity A", "Entity B", "USES", project)
+	if err != nil {
+		t.Fatalf("Error al enlazar Entity A -> USES -> Entity B: %v", err)
+	}
+
+	// Entidad B -> DEPRECATED_BY -> Entity C
+	err = s.LinkEntities("Entity B", "Entity C", "DEPRECATED_BY", project)
+	if err != nil {
+		t.Fatalf("Error al enlazar Entity B -> DEPRECATED_BY -> Entity C: %v", err)
+	}
+
+	// 2. Ejecutar inferencia transitiva de hasta 3 saltos
+	paths, err := s.getTransitiveRelations("Entity A", project, 3)
+	if err != nil {
+		t.Fatalf("Error en getTransitiveRelations: %v", err)
+	}
+
+	// 3. Validar resultados
+	if len(paths) != 2 {
+		t.Fatalf("Se esperaban exactamente 2 caminos transitivos, se obtuvieron: %d (Resultados: %v)", len(paths), paths)
+	}
+
+	var hasDirect, hasTransitive bool
+	for _, p := range paths {
+		if p == "Entity A --[USES]--> Entity B" {
+			hasDirect = true
+		}
+		if p == "Entity A --[USES]--> Entity B --[DEPRECATED_BY]--> Entity C" {
+			hasTransitive = true
+		}
+	}
+
+	if !hasDirect {
+		t.Errorf("No se detectó el camino directo: 'Entity A --[USES]--> Entity B'")
+	}
+	if !hasTransitive {
+		t.Errorf("No se detectó la inferencia transitiva de 2 saltos: 'Entity A --[USES]--> Entity B --[DEPRECATED_BY]--> Entity C'")
+	}
+}
