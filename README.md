@@ -25,13 +25,39 @@ A lightweight Go AST parser inspects directory trees to map the exact physical a
 ### 3. Transitive Graph Inference Engine
 Using SQLite recursive Common Table Expressions (CTEs), the system traverses semantic relations up to 3 hops. This enables the engine to resolve transitive paths (for example, if `A` uses `B`, and `B` is deprecated by `C`, the system infers that `A` is affected by the deprecation of `C`) and injects these deductions into the AI context.
 
-## Building from Source
+## Compilation and Deployment
 
-To compile the standalone binary, ensure you have Go 1.21+ installed and run the following command from the repository root:
+If you prefer to build the standalone binary yourself instead of using precompiled release assets, follow this step-by-step guide.
+
+### Prerequisites
+
+Ensure you have Go 1.21 or higher installed. You can verify your installation by running:
 
 ```bash
-go build -o mcp-server.exe ./cmd/mcp-server
+go version
 ```
+
+### Step 1: Compile the Executable
+
+Run the compilation command from the root of the repository. This will compile the codebase and place the executable inside a dedicated `bin` directory:
+
+#### Windows
+```powershell
+go build -o bin/mcp-server.exe ./cmd/mcp-server
+```
+
+#### Linux and macOS
+```bash
+go build -o bin/mcp-server ./cmd/mcp-server
+```
+
+### Step 2: Relocate the Binary
+
+Move the compiled executable (`mcp-server.exe` on Windows or `mcp-server` on Unix-like systems) to a stable, dedicated directory on your system where it will not be modified or deleted by cleanups (for example, `C:/mcp-servers/second-brain/` or `/usr/local/bin/`).
+
+### Step 3: Register the Absolute Path
+
+Identify the absolute path where you placed the binary. You will need to provide this exact path when configuring the Model Context Protocol in the next section.
 
 ## Model Context Protocol (MCP) Registration
 
