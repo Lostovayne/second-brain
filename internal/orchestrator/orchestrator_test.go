@@ -32,7 +32,24 @@ func TestScanProject(t *testing.T) {
 	// Crear archivos de prueba
 	files := map[string]string{
 		filepath.Join(tempDir, "cmd", "main.go"):        "package main",
-		filepath.Join(tempDir, "internal", "utils.go"):  "package internal",
+		filepath.Join(tempDir, "internal", "utils.go"): `package internal
+
+type Requester interface {
+	Request() error
+}
+
+type Config struct {
+	URL string
+}
+
+func GetConfig() *Config {
+	return &Config{}
+}
+
+func (c *Config) Validate() bool {
+	return true
+}
+`,
 		filepath.Join(tempDir, "go.mod"):                "module test_project",
 		filepath.Join(tempDir, "harvester.db"):          "", // Debe ser ignorado
 		filepath.Join(tempDir, ".git", "config"):        "", // Debe ser ignorado (está dentro de .git)
@@ -62,6 +79,17 @@ func TestScanProject(t *testing.T) {
 	}
 	if !strings.Contains(md, "go.mod") {
 		t.Error("Se esperaba que el Markdown incluyera el archivo 'go.mod'")
+	}
+
+	// Verificar componentes parseados del AST
+	if !strings.Contains(md, "Interfaces: `Requester`") {
+		t.Errorf("Se esperaba que incluyera la interfaz 'Requester' en el AST. Obtenido:\n%s", md)
+	}
+	if !strings.Contains(md, "Structs: `Config`") {
+		t.Errorf("Se esperaba que incluyera la estructura 'Config' en el AST. Obtenido:\n%s", md)
+	}
+	if !strings.Contains(md, "Funciones: `GetConfig`, `(*Config) Validate`") {
+		t.Errorf("Se esperaba que incluyera las funciones 'GetConfig' y '(*Config) Validate'. Obtenido:\n%s", md)
 	}
 
 	// Validar que se hayan ignorado los archivos/carpetas correctos
